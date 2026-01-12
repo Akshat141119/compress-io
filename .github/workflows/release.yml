@@ -8,8 +8,8 @@ on:
 jobs:
   release:
     permissions:
-      contents: write
-      pull-requests: write # Added to ensure the action can manage release resources
+      contents: write      # Essential for creating releases
+      pull-requests: write # Helps manage release assets
     strategy:
       fail-fast: false
       matrix:

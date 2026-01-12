@@ -54,7 +54,8 @@ jobs:
       - name: Build and Sign the App
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # CRITICAL CHANGE: We now use the powerful RELEASE_TOKEN instead of GITHUB_TOKEN
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:

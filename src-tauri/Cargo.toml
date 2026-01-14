@@ -1,16 +1,18 @@
 [package]
 name = "universal-compressor"
-version = "0.1.0"
+version = "0.1.21"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# 👇 NEW FEATURES SECTION 👇
+# This creates the "switch" for your two versions
+[features]
+default = ["cpu"] # Default build is CPU (Safe)
+cpu = []
+gpu = []          # We will turn this on manually for the Pro version
 
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "universal_compressor_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -30,4 +32,3 @@ tauri-plugin-process = "2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
-

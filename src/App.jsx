@@ -1,114 +1,179 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open, message, ask } from "@tauri-apps/plugin-dialog";
+import { open, save, message, ask } from "@tauri-apps/plugin-dialog";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { motion, AnimatePresence } from "framer-motion";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event"; 
 import "./App.css";
 
 export default function App() {
   const [filePath, setFilePath] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  
-  // Settings: Only Dimensions now (Size Limit removed)
-  const [dimSettings, setDimSettings] = useState({ width: "", height: "" });
   const [logs, setLogs] = useState("");
+  
+  // Progress State
+  const [progress, setProgress] = useState(0);
+  const [timeLeft, setTimeLeft] = useState(null);
+  
+  // Ref for Duration calculation
+  const totalDurationRef = useRef(0);
+
+  const [dimSettings, setDimSettings] = useState({ width: "", height: "" });
 
   // File Type Detection
   const isImage = filePath.match(/\.(jpg|jpeg|png|webp|bmp|tiff)$/i);
   const isPdf   = filePath.match(/\.(pdf)$/i);              
   const isDoc   = filePath.match(/\.(doc|docx|txt|rtf)$/i); 
   
-  // Label Logic
   let fileTypeLabel = "VID";
   if (isImage) fileTypeLabel = "IMG";
   else if (isPdf) fileTypeLabel = "PDF";
   else if (isDoc) fileTypeLabel = "DOC";
 
   useEffect(() => {
-    // 1. Listen for backend logs
-    const unlistenLogs = listen("compression-log", (event) => setLogs(event.payload.slice(-80)));
-    
-    // 2. Run Auto-Update Check on Startup
     checkForAppUpdates();
 
-    return () => { unlistenLogs.then(f => f()); };
+    // LISTEN FOR FFMPEG PROGRESS
+    const unlisten = listen("ffmpeg-progress", (event) => {
+      const line = event.payload;
+      
+      // 1. Capture Duration
+      const durationMatch = line.match(/Duration:\s+(\d{2}):(\d{2}):(\d{2})/);
+      if (durationMatch) {
+        const h = parseInt(durationMatch[1]);
+        const m = parseInt(durationMatch[2]);
+        const s = parseInt(durationMatch[3]);
+        totalDurationRef.current = (h * 3600) + (m * 60) + s;
+      }
+
+      // 2. Capture Current Time
+      const timeMatch = line.match(/time=(\d{2}):(\d{2}):(\d{2})/);
+      if (timeMatch && totalDurationRef.current > 0) {
+        const h = parseInt(timeMatch[1]);
+        const m = parseInt(timeMatch[2]);
+        const s = parseInt(timeMatch[3]);
+        const currentSeconds = (h * 3600) + (m * 60) + s;
+
+        const percent = Math.round((currentSeconds / totalDurationRef.current) * 100);
+        setProgress(percent);
+
+        const remaining = totalDurationRef.current - currentSeconds;
+        setTimeLeft(formatTime(remaining));
+      }
+
+      setLogs(line);
+    });
+
+    return () => {
+      unlisten.then(f => f());
+    };
   }, []);
 
-  // --- AUTO UPDATER FUNCTION ---
+  function formatTime(seconds) {
+    if (seconds < 0) return "Calculating...";
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}m ${s}s`;
+  }
+
   async function checkForAppUpdates() {
     try {
       const update = await check();
       if (update?.available) {
-        const yes = await ask(`Update to v${update.version} is available!\n\nRelease notes: ${update.body}`, {
-          title: 'Update Available',
-          kind: 'info',
-          okLabel: 'Update Now',
-          cancelLabel: 'Later'
+        const yes = await ask(`Update v${update.version} available!`, {
+          title: 'Update Available', kind: 'info', okLabel: 'Update', cancelLabel: 'Later'
         });
-
         if (yes) {
           await update.downloadAndInstall();
           await relaunch();
         }
       }
-    } catch (error) {
-      // It's normal for this to fail in "Dev Mode", so we just log it silently.
-      console.log("Updater check skipped (Dev Mode or Network Error):", error);
-    }
+    } catch (error) { console.log("Updater check skipped"); }
   }
 
-  // --- FILE SELECTION ---
   async function handleFileSelect() {
     try {
       const selected = await open({
         multiple: false,
         filters: [{
           name: 'Media',
-          extensions: ['jpg', 'png', 'mp4', 'mkv', 'avi', 'mov', 'pdf'] 
+          extensions: ['mp4', 'mkv', 'avi', 'mov', 'png', 'jpg', 'jpeg', 'webp'] 
         }]
       });
       if (selected) {
         setFilePath(selected);
+        setLogs(""); 
+        setProgress(0);
+        setTimeLeft(null);
+        totalDurationRef.current = 0;
+        setDimSettings({ width: "", height: "" });
       }
-    } catch (err) {
-      console.error(err);
-    }
+    } catch (err) { console.error(err); }
   }
 
-  // --- COMPRESSION LOGIC ---
+  // --- UPDATED COMPRESSION LOGIC (PRESERVES EXTENSION) ---
   async function startCompression() {
     if (!filePath) return;
     
-    // Safety Block for Docs
     if (isPdf || isDoc) {
-      await message("Document compression is currently disabled. Please select a Video or Image.", { 
-        title: "Feature Disabled", kind: "info" 
-      });
+      await message("Documents not supported yet.", { title: "Warning", kind: "warning" });
       return;
     }
 
+    // 1. EXTRACT ORIGINAL EXTENSION (e.g., "mkv", "png")
+    const originalExt = filePath.split('.').pop(); 
+    
+    const filterName = isImage ? "Compressed Image" : "Compressed Video";
+
+    // 2. USE ORIGINAL EXTENSION IN SAVE DIALOG
+    const outputPath = await save({
+      filters: [{
+        name: filterName,
+        extensions: [originalExt] // <--- This forces the original format
+      }],
+      defaultPath: `compressed_${Date.now()}.${originalExt}`
+    });
+
+    if (!outputPath) return; // User cancelled
+
     setIsProcessing(true);
-    setLogs("");
+    setProgress(0);
+    setTimeLeft("Starting...");
     
     try {
-      const savedPath = await invoke("compress_file", { 
-        filePath,
-        width: isImage ? (dimSettings.width || "0") : "0",
-        height: isImage ? (dimSettings.height || "0") : "0",
-        targetSize: "0" // Always 0 since input was removed
-      });
-      await message(`Saved to: ${savedPath}`);
+      if (isImage) {
+        await invoke("compress_image", { 
+          input: filePath,
+          output: outputPath,
+          width: dimSettings.width || "0", 
+          height: dimSettings.height || "0"
+        });
+        setProgress(100); 
+      } else {
+        await invoke("compress_video", { 
+          input: filePath,
+          output: outputPath
+        });
+        setProgress(100);
+      }
+
+      await message(`Saved to:\n${outputPath}`, { title: "Success", kind: "info" });
+      
     } catch (e) { 
       console.error(e); 
-      setLogs("Error: " + e);
-    } finally { setIsProcessing(false); }
+      setLogs("Error: " + e); 
+      await message(`Failed: ${e}`, { title: "Error", kind: "error" });
+    } finally { 
+      setIsProcessing(false); 
+      setTimeLeft(null);
+    }
   }
 
   function removeFile() {
     setFilePath("");
     setLogs("");
+    setProgress(0);
     setDimSettings({ width: "", height: "" });
   }
 
@@ -123,7 +188,7 @@ export default function App() {
           <div className="logo-area"><span className="logo-icon">⚡</span><h1>Compress I/O</h1></div>
           <div className="status-bubble">
             <span className={`status-dot ${isProcessing ? 'pulsing' : ''}`}></span>
-            {isProcessing ? "Working..." : "Idle"}
+            {isProcessing ? "Processing..." : "Idle"}
           </div>
         </header>
 
@@ -147,11 +212,27 @@ export default function App() {
                 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
                 className="file-card-soft"
               >
-                <div className={`file-icon-soft ${(isPdf || isDoc) ? 'unsupported' : ''}`}>
-                    {fileTypeLabel}
-                </div>
+                <div className={`file-icon-soft`}>{fileTypeLabel}</div>
                 <div className="file-info">
                   <span className="file-name" title={filePath}>{filePath.split(/[\\/]/).pop()}</span>
+                  
+                  {isProcessing && !isImage && (
+                    <div className="progress-container">
+                      <div className="progress-bar-bg">
+                        <motion.div 
+                          className="progress-bar-fill" 
+                          initial={{ width: 0 }}
+                          animate={{ width: `${progress}%` }}
+                          transition={{ type: "spring", stiffness: 50 }}
+                        />
+                      </div>
+                      <div className="progress-stats">
+                        <span>{progress}%</span>
+                        <span>{timeLeft ? `~${timeLeft} left` : "Calculating..."}</span>
+                      </div>
+                    </div>
+                  )}
+
                 </div>
                 <button className="btn-remove-soft" onClick={removeFile} disabled={isProcessing}>✕</button>
               </motion.div>
@@ -159,15 +240,14 @@ export default function App() {
           </AnimatePresence>
         </motion.div>
 
-        {/* SETTINGS AREA (Only for Images) */}
         <AnimatePresence>
           {isImage && (
             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="settings-soft">
               <div className="input-block">
-                <label>Rescale Dimensions (Pixels)</label>
+                <label>Rescale (Optional)</label>
                 <div className="row">
-                  <input type="number" placeholder="Width (e.g. 1920)" value={dimSettings.width} onChange={(e) => setDimSettings({...dimSettings, width: e.target.value})} />
-                  <input type="number" placeholder="Height (e.g. 1080)" value={dimSettings.height} onChange={(e) => setDimSettings({...dimSettings, height: e.target.value})} />
+                  <input type="number" placeholder="Width" value={dimSettings.width} onChange={(e) => setDimSettings({...dimSettings, width: e.target.value})} />
+                  <input type="number" placeholder="Height" value={dimSettings.height} onChange={(e) => setDimSettings({...dimSettings, height: e.target.value})} />
                 </div>
               </div>
             </motion.div>
@@ -175,14 +255,19 @@ export default function App() {
         </AnimatePresence>
 
         <motion.div layout className="footer-area">
+          <div className="logs-container" style={{ fontSize: '0.7rem', color: '#999', marginBottom: '8px', height: '18px', overflow: 'hidden', whiteSpace: 'nowrap', textOverflow: 'ellipsis' }}>
+            {logs}
+          </div>
+
           {!isProcessing ? (
             <motion.button whileHover={{ scale: 1.02 }} className="btn-gradient start" onClick={startCompression} disabled={!filePath}>
-              {(isPdf || isDoc) ? "Format Not Supported" : "Start Optimization"}
+              Start Optimization
             </motion.button>
           ) : (
-            <motion.button className="btn-gradient stop" onClick={() => invoke("stop_compression")}>Stop Process</motion.button>
+            <motion.button className="btn-gradient stop" onClick={() => window.location.reload()}>
+              Stop (Restart App)
+            </motion.button>
           )}
-          {isProcessing && <motion.div className="logs-soft">{logs || "Initializing..."}</motion.div>}
         </motion.div>
       </motion.div>
     </div>

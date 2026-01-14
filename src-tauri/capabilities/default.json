@@ -6,8 +6,8 @@
   "permissions": [
     "core:default",
     "core:window:default",
-    "core:event:default",
     "core:webview:default",
+    "core:event:default",
     "dialog:default",
     "notification:default",
     "shell:allow-open",
@@ -17,9 +17,9 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "binaries/ffmpeg",
-          "cmd": "binaries/ffmpeg",
-          "args": true
+          "name": "ffmpeg",
+          "args": true,
+          "sidecar": true
         }
       ]
     }

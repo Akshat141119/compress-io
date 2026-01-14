@@ -11,8 +11,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Changed Mac to 13 (Intel) to match the binary we download
-        platform: [macos-13, ubuntu-22.04, windows-latest]
+        # FIX 1: Upgrade to macos-15 (The old one is retired)
+        platform: [macos-15, ubuntu-22.04, windows-latest]
     
     runs-on: ${{ matrix.platform }}
     steps:
@@ -29,9 +29,10 @@ jobs:
 
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
+        # FIX 2: Changed libwebkit2gtk-4.0-dev to 4.1-dev
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev libappindicator3-dev librsvg2-dev patchelf
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       # --- SMART AUTO-DOWNLOAD SECTION ---
       
@@ -41,16 +42,17 @@ jobs:
           mkdir -p src-tauri/binaries
           wget https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz
           tar -xf ffmpeg-release-amd64-static.tar.xz
-          # Find the file wherever it is and move it
           find . -name "ffmpeg" -type f -exec mv {} src-tauri/binaries/ffmpeg-x86_64-unknown-linux-gnu \;
 
       - name: Download FFmpeg (Mac)
-        if: matrix.platform == 'macos-13'
+        if: matrix.platform == 'macos-15'
         run: |
           mkdir -p src-tauri/binaries
-          curl -L -o ffmpeg.zip https://evermeet.cx/ffmpeg/getrelease/zip
+          # FIX 3: Download ARM64 version because macos-15 is Apple Silicon
+          curl -L -o ffmpeg.zip https://www.osxexperts.net/ffmpeg7arm.zip
           unzip ffmpeg.zip
-          mv ffmpeg src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+          # Move and rename to match what Tauri expects on M1/M2 macs
+          find . -name "ffmpeg" -type f -exec mv {} src-tauri/binaries/ffmpeg-aarch64-apple-darwin \;
 
       - name: Download FFmpeg (Windows)
         if: matrix.platform == 'windows-latest'
@@ -58,13 +60,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path src-tauri/binaries
           curl.exe -L -o ffmpeg.zip https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
           7z x ffmpeg.zip
-          # Smart Search: Find ffmpeg.exe inside any subfolder and move it
           $ffmpeg = Get-ChildItem -Recurse -Filter ffmpeg.exe | Select-Object -First 1
           Move-Item -Path $ffmpeg.FullName -Destination src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
-          
-          # VERIFICATION: Print folder content to prove it's there
-          echo "CHECKING FOLDER CONTENT:"
-          ls src-tauri/binaries
       
       # ----------------------------------
 

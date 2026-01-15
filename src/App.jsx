@@ -12,6 +12,9 @@ export default function App() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [logs, setLogs] = useState("");
   
+  // NEW: GPU State
+  const [useGpu, setUseGpu] = useState(false);
+
   // Progress State
   const [progress, setProgress] = useState(0);
   const [timeLeft, setTimeLeft] = useState(null);
@@ -25,6 +28,8 @@ export default function App() {
   const isImage = filePath.match(/\.(jpg|jpeg|png|webp|bmp|tiff)$/i);
   const isPdf   = filePath.match(/\.(pdf)$/i);              
   const isDoc   = filePath.match(/\.(doc|docx|txt|rtf)$/i); 
+  // Helper for video specific UI
+  const isVideo = !isImage && !isPdf && !isDoc && filePath;
   
   let fileTypeLabel = "VID";
   if (isImage) fileTypeLabel = "IMG";
@@ -108,6 +113,7 @@ export default function App() {
         setTimeLeft(null);
         totalDurationRef.current = 0;
         setDimSettings({ width: "", height: "" });
+        setUseGpu(false); // Reset GPU toggle on new file
       }
     } catch (err) { console.error(err); }
   }
@@ -151,9 +157,11 @@ export default function App() {
         });
         setProgress(100); 
       } else {
+        // --- UPDATED: Pass the useGpu flag to Rust ---
         await invoke("compress_video", { 
           input: filePath,
-          output: outputPath
+          output: outputPath,
+          useGpu: useGpu  // <--- NEW ARGUMENT
         });
         setProgress(100);
       }
@@ -175,6 +183,7 @@ export default function App() {
     setLogs("");
     setProgress(0);
     setDimSettings({ width: "", height: "" });
+    setUseGpu(false);
   }
 
   return (
@@ -240,16 +249,37 @@ export default function App() {
           </AnimatePresence>
         </motion.div>
 
+        {/* --- SETTINGS AREA (Rescale & GPU) --- */}
         <AnimatePresence>
-          {isImage && (
+          {(isImage || isVideo) && (
             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="settings-soft">
-              <div className="input-block">
-                <label>Rescale (Optional)</label>
-                <div className="row">
-                  <input type="number" placeholder="Width" value={dimSettings.width} onChange={(e) => setDimSettings({...dimSettings, width: e.target.value})} />
-                  <input type="number" placeholder="Height" value={dimSettings.height} onChange={(e) => setDimSettings({...dimSettings, height: e.target.value})} />
+              
+              {/* IMAGE SETTINGS */}
+              {isImage && (
+                <div className="input-block">
+                  <label>Rescale (Optional)</label>
+                  <div className="row">
+                    <input type="number" placeholder="Width" value={dimSettings.width} onChange={(e) => setDimSettings({...dimSettings, width: e.target.value})} />
+                    <input type="number" placeholder="Height" value={dimSettings.height} onChange={(e) => setDimSettings({...dimSettings, height: e.target.value})} />
+                  </div>
                 </div>
-              </div>
+              )}
+
+              {/* VIDEO SETTINGS (NEW GPU TOGGLE) */}
+              {isVideo && (
+                <div className="input-block" style={{ marginTop: '10px' }}>
+                   <label style={{ display: 'flex', alignItems: 'center', cursor: 'pointer', gap: '8px' }}>
+                     <input 
+                       type="checkbox" 
+                       checked={useGpu} 
+                       onChange={(e) => setUseGpu(e.target.checked)} 
+                       style={{ accentColor: '#ff6b6b', transform: 'scale(1.1)' }}
+                     />
+                     <span>Use GPU Acceleration (NVIDIA)</span>
+                   </label>
+                </div>
+              )}
+
             </motion.div>
           )}
         </AnimatePresence>
@@ -261,7 +291,7 @@ export default function App() {
 
           {!isProcessing ? (
             <motion.button whileHover={{ scale: 1.02 }} className="btn-gradient start" onClick={startCompression} disabled={!filePath}>
-              Start Optimization
+              Start Optimization {useGpu ? "(GPU)" : ""}
             </motion.button>
           ) : (
             <motion.button className="btn-gradient stop" onClick={() => window.location.reload()}>

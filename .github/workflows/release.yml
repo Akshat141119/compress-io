@@ -11,7 +11,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # FIX 1: Upgrade to macos-15 (The old one is retired)
         platform: [macos-15, ubuntu-22.04, windows-latest]
     
     runs-on: ${{ matrix.platform }}
@@ -29,7 +28,6 @@ jobs:
 
       - name: Install dependencies (Ubuntu only)
         if: matrix.platform == 'ubuntu-22.04'
-        # FIX 2: Changed libwebkit2gtk-4.0-dev to 4.1-dev
         run: |
           sudo apt-get update
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
@@ -48,10 +46,8 @@ jobs:
         if: matrix.platform == 'macos-15'
         run: |
           mkdir -p src-tauri/binaries
-          # FIX 3: Download ARM64 version because macos-15 is Apple Silicon
           curl -L -o ffmpeg.zip https://www.osxexperts.net/ffmpeg7arm.zip
           unzip ffmpeg.zip
-          # Move and rename to match what Tauri expects on M1/M2 macs
           find . -name "ffmpeg" -type f -exec mv {} src-tauri/binaries/ffmpeg-aarch64-apple-darwin \;
 
       - name: Download FFmpeg (Windows)
@@ -72,8 +68,8 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # REMOVED: TAURI_SIGNING_PRIVATE_KEY
+          # REMOVED: TAURI_SIGNING_PRIVATE_KEY_PASSWORD
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Compress I/O ${{ github.ref_name }}'

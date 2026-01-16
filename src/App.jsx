@@ -25,6 +25,7 @@ export default function App() {
   const [dimSettings, setDimSettings] = useState({ width: "", height: "" });
 
   // File Type Detection
+  // Updated Regex to include new formats
   const isImage = filePath.match(/\.(jpg|jpeg|png|webp|bmp|tiff)$/i);
   const isPdf   = filePath.match(/\.(pdf)$/i);              
   const isDoc   = filePath.match(/\.(doc|docx|txt|rtf)$/i); 
@@ -102,7 +103,13 @@ export default function App() {
         multiple: false,
         filters: [{
           name: 'Media',
-          extensions: ['mp4', 'mkv', 'avi', 'mov', 'png', 'jpg', 'jpeg', 'webp'] 
+          // ✅ THE COMPLETE LIST OF SUPPORTED EXTENSIONS
+          extensions: [
+            // Video
+            'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'm4v', 'ts', 'ogv', 'gif',
+            // Image
+            'png', 'jpg', 'jpeg', 'webp', 'bmp', 'tiff'
+          ] 
         }]
       });
       if (selected) {
@@ -117,7 +124,7 @@ export default function App() {
     } catch (err) { console.error(err); }
   }
 
-  // --- UPDATED COMPRESSION LOGIC ---
+  // --- COMPRESSION LOGIC ---
   async function startCompression() {
     if (!filePath) return;
     
@@ -127,8 +134,9 @@ export default function App() {
     }
 
     const originalExt = filePath.split('.').pop(); 
-    const filterName = isImage ? "Compressed Image" : "Compressed Video";
+    const filterName = isImage ? "Compressed Image" : "Compressed Media";
 
+    // We strictly use original extension because backend handles codec switching (e.g. WebM -> VP9)
     const outputPath = await save({
       filters: [{
         name: filterName,
@@ -157,7 +165,7 @@ export default function App() {
         await invoke("compress_video", { 
           input: filePath,
           output: outputPath,
-          autoGpu: useGpu  // We tell Rust to "Try Auto GPU"
+          autoGpu: useGpu 
         });
         setProgress(100);
       }
@@ -264,7 +272,6 @@ export default function App() {
               {/* VIDEO SETTINGS (AUTO GPU WITH TOGGLE STYLE) */}
               {isVideo && (
                 <div className="input-block" style={{ marginTop: '10px' }}>
-                   {/* This label wraps the whole row to make it clickable */}
                    <label className="gpu-toggle-container">
                      
                      {/* The Slider Switch */}
@@ -297,7 +304,14 @@ export default function App() {
               Start Optimization {useGpu ? "(Turbo)" : ""}
             </motion.button>
           ) : (
-            <motion.button className="btn-gradient stop" onClick={() => window.location.reload()}>
+            // --- UPDATED STOP BUTTON (Calls kill_ffmpeg) ---
+            <motion.button 
+              className="btn-gradient stop" 
+              onClick={async () => {
+                await invoke("kill_ffmpeg");
+                window.location.reload(); 
+              }}
+            >
               Stop (Restart App)
             </motion.button>
           )}
